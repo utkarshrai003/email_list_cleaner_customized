@@ -5,6 +5,8 @@ require "yaml"
 require "csv"
 require "fileutils"
 require "singleton"
+require "pg"
+
 Bundler.require(:default)
 
 Dir.glob("lib/**/*.rb") {|f| require_relative f}
@@ -22,6 +24,14 @@ class EmailListCleaner
   R_SET_GOOD   = "good"
   R_SET_BAD    = "bad"
 
+  # --------------------------------------------------------
+
+  # Database config.
+  DB_HOST = 'db_host'
+  DB_NAME = 'skydata'
+  DB_USERNAME = 'db_username'
+  DB_PASSWORD = 'db_password'
+
   # ruby-progressbar format
   # https://github.com/jfelchner/ruby-progressbar/wiki/Formatting
   PROGRESS_FORMAT = "%t [%c/%C] %w"
@@ -35,6 +45,7 @@ class EmailListCleaner
     config_redis
     config_email_verifier
     config_proxy_list
+    establish_db_connection
   end
 
   # If proxy_addresses defined in proxylist.csv or config.yml, this provides
@@ -70,15 +81,16 @@ class EmailListCleaner
   # CSV expected to have "Name", "Email address" in each row
   # Optionally filters only emails that match regexp
   def load_csv_into_redis_set(regexp=nil)
-    csv_arr = CSV.read("_list.csv")
+    db_record_array = fetch_records
     @pg = ProgressBar.create(
       title: "Load into Redis",
       format: PROGRESS_FORMAT,
-      total: csv_arr.length
+      total: db_record_array.length
     )
+
     # reset key
     @r_named.del(R_SET_TODO)
-    csv_arr.each do |row|
+    db_record_array.each do |row|
       email = row[1]
 
       next unless email =~ regexp if regexp
@@ -105,7 +117,7 @@ class EmailListCleaner
   end
 
   def write_csv_file(redis_key, file_name)
-    email_arr = @r_named.smembers(redis_key)
+    email_arr = @r_named.smembers(redis_key) 
     File.open(file_name, "w") do |f|
       f << email_arr.join("\n")
     end
@@ -136,6 +148,7 @@ class EmailListCleaner
   end
 
   def verify_until_done
+    binding.pry
     email = nil 
     while email = @r_named.spop(R_SET_TODO) do
       sleep @sleep_time
@@ -152,11 +165,8 @@ class EmailListCleaner
     rescue => e
       @pg.log "  (!) #{e.message}"
     end
-    if success
-      @r_named.sadd(R_SET_GOOD, email)
-    else
-      @r_named.sadd(R_SET_BAD, email)
-    end
+
+    success ? update_mx_valid(email, false) : update_mx_valid(email, true)
   end
 
   def print_stats
@@ -191,6 +201,18 @@ class EmailListCleaner
     @proxy_list.length
   end
 
+  def establish_db_connection
+    @conn = PG::Connection.new(DB_HOST, nil, nil, nil, DB_NAME, DB_USERNAME, DB_PASSWORD)
+  end
+
+  def fetch_records
+    @conn.exec('Select id, email from people limit 5').values
+  end
+
+  def update_mx_valid(email, mx_valid)
+    query = "UPDATE people SET mx_valid = #{mx_valid} WHERE id = 1" #email = #{email}"
+    @conn.exec(query);
+  end
 end
 
 # For quick irb reference
