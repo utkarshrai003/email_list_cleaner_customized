@@ -6,6 +6,7 @@ require "csv"
 require "fileutils"
 require "singleton"
 require "pg"
+require "benchmark"
 
 Bundler.require(:default)
 
@@ -27,10 +28,10 @@ class EmailListCleaner
   # --------------------------------------------------------
 
   # Database config.
-  DB_HOST = 'db_host'
+  DB_HOST = 'csg.cyruxuioaadm.us-east-1.rds.amazonaws.com'
   DB_NAME = 'skydata'
-  DB_USERNAME = 'db_username'
-  DB_PASSWORD = 'db_password'
+  DB_USERNAME = 'csgdb'
+  DB_PASSWORD = '0nmgjxrN'
 
   # ruby-progressbar format
   # https://github.com/jfelchner/ruby-progressbar/wiki/Formatting
@@ -94,8 +95,7 @@ class EmailListCleaner
       email = row[1]
 
       next unless email =~ regexp if regexp
-
-      @r_named.sadd(R_SET_TODO, email)
+      @r_named.sadd(R_SET_TODO, {id: row[0], email: row[1]}.to_json)
       @pg.increment
     end
     return @r_named.scard(R_SET_TODO)
@@ -148,25 +148,32 @@ class EmailListCleaner
   end
 
   def verify_until_done
-    binding.pry
     email = nil 
     while email = @r_named.spop(R_SET_TODO) do
+      row = JSON.parse(email)
       sleep @sleep_time
-      verify_email(email)
+      verify_email(row)
       @pg.increment
     end
   end
 
-  def verify_email(email)
+  def verify_email(row)
+    id = row['id']
+    email = row['email']
     @pg.log "\n= #{email}"
     success = false
     begin
-      success = EmailVerifier.check(email)
+      puts "****** Trying for mail checking server connection ********"
+      time = Benchmark.measure do
+        success = EmailVerifier.check(email)
+      end
+      puts "~~~~~~~~~~~~~~~~~~~~~~~~~~~~ > #{time}"
     rescue => e
+      puts "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$"
       @pg.log "  (!) #{e.message}"
     end
 
-    success ? update_mx_valid(email, false) : update_mx_valid(email, true)
+    success ? update_mx_valid(id, false) : update_mx_valid(id, true)
   end
 
   def print_stats
@@ -209,9 +216,13 @@ class EmailListCleaner
     @conn.exec('Select id, email from people limit 5').values
   end
 
-  def update_mx_valid(email, mx_valid)
-    query = "UPDATE people SET mx_valid = #{mx_valid} WHERE id = 1" #email = #{email}"
-    @conn.exec(query);
+  def update_mx_valid(id, mx_valid)
+    time = Benchmark.measure do
+      query = "UPDATE people SET mx_valid = #{mx_valid} WHERE id = #{id}";
+      @conn.exec(query);
+    end
+
+    puts "----------------- >> #{time}"
   end
 end
 
