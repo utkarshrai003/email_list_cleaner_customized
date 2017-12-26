@@ -162,6 +162,7 @@ class EmailListCleaner
     email = row['email']
     @pg.log "\n= #{email}"
     success = false
+    binding.pry
     begin
       puts "****** Trying for mail checking server connection ********"
       time = Benchmark.measure do
