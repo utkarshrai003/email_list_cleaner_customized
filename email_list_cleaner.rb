@@ -186,11 +186,11 @@ class EmailListCleaner
   private
 
   def config_redis
-    r_config = {db: R_DEFAULT_DB}
+    # r_config = {db: R_DEFAULT_DB}
     unless @config["redis_password"].to_s.empty?
       r_config["password"] = @config["redis_password"]
     end
-    r_conn = Redis.new(db: "redis-14326.c11.us-east-1-3.ec2.cloud.redislabs.com:14326")
+    r_conn = Redis.new(host: "redis-14326.c11.us-east-1-3.ec2.cloud.redislabs.com", port: 14326)
     # r_conn = Redis.new(r_config)
     @r_named = Redis::Namespace.new(R_NAMESPACE, redis: r_conn)
   end
